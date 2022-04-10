@@ -55,6 +55,7 @@ contract NearBridge is INearBridge, AdminControlled {
     mapping(uint64 => bytes32) blockMerkleRoots_;
     mapping(address => uint256) public override balanceOf;
 
+    // the contract is instatiated by passing as arguement s admin_, pausedFlags_ to AdminControlled contract
     constructor(
         Ed25519 ed,
         uint256 lockEthAmount_,
@@ -77,11 +78,21 @@ contract NearBridge is INearBridge, AdminControlled {
     uint constant PAUSED_CHALLENGE = 8;
     uint constant PAUSED_VERIFY = 16;
 
+    // the deposit is an override function , that uses the pausable modifier to check if 
+    // (paused & flag) == 0 (flag is the input i.e PAUSED_DEPOSIT) or caller of the contract is an admin
+    // also checks if the value passed is equal to the lockEthAmount and the balance of the function caller is zero
+    // then value is added to  balance of the function caller
     function deposit() public payable override pausable(PAUSED_DEPOSIT) {
         require(msg.value == lockEthAmount && balanceOf[msg.sender] == 0);
         balanceOf[msg.sender] = msg.value;
     }
 
+    // the withdraw is an override function , that uses the pausable modifier to check if 
+    // (paused & flag) == 0 (flag is the input i.e PAUSED_WITHDRAW) or caller of the contract is an admin
+    // checks if the address of the function callers isn't the last account that submitted to the blockchain or the current time greater than lastValidAt(i.e end pf challenge time)
+    // save balance of the function caller to a variable and checks if the values is not equal to zero (cannot withdraw 0)
+    // changes the balance of the function caller to zero
+    // transfer the value
     function withdraw() public override pausable(PAUSED_WITHDRAW) {
         require(msg.sender != lastSubmitter || block.timestamp >= lastValidAt);
         uint amount = balanceOf[msg.sender];
@@ -90,6 +101,12 @@ contract NearBridge is INearBridge, AdminControlled {
         payable(msg.sender).transfer(amount);
     }
 
+    // the challenge is an override function , that uses the pausable modifier to check if 
+    // (paused & flag) == 0 (flag is the input i.e PAUSED_CHALLENGE) or caller of the contract is an admin
+    // checks if the current time is lesser than lastValidAt(No block can be challenged at this time)
+    // cehcks if the signatureIndex is not a valid signature
+    // then the lockEthAmount is deducted from the balanceOf the lastSubmitter
+    // the receiver recieves the value of the lockEthAmount/2
     function challenge(address payable receiver, uint signatureIndex) external override pausable(PAUSED_CHALLENGE) {
         require(block.timestamp < lastValidAt, "No block can be challenged at this time");
         require(!checkBlockProducerSignatureInHead(signatureIndex), "Can't challenge valid signature");
@@ -99,6 +116,7 @@ contract NearBridge is INearBridge, AdminControlled {
         receiver.call{value: lockEthAmount / 2}("");
     }
 
+    // the checkBlockProducerSignatureInHead function checks if the signatureIndex is valid and returns a bool
     function checkBlockProducerSignatureInHead(uint signatureIndex) public view override returns (bool) {
         // Shifting by a number >= 256 returns zero.
         require((untrustedSignatureSet & (1 << signatureIndex)) != 0, "No such signature");
